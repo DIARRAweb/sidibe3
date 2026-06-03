@@ -7456,16 +7456,20 @@ button {
   </div>
 </div>
 
-  <div id="notifBox" style="display:none;">
-  <div class="notif-wrapper">
+        <div id="notifBox" style="display:none;">
+        <div class="notif-wrapper">
 
-    <h2 class="message-modal-title">🔔 Boîte de message</h2>
+          <h2 class="message-modal-title">🔔 Boîte de message</h2>
 
-    <p class="message-modal-subtitle">
-      Retrouve ici tes notifications, transferts reçus, remboursements et réclamations.
-    </p>
+          <p class="message-modal-subtitle">
+            Retrouve ici tes notifications, transferts reçus, remboursements et réclamations.
+          </p>
 
-    <div id="notifList" class="notif-list"></div>
+          <button id="clearNotifBtn" class="send-btn" onclick="clearAllNotifications()">
+        🧹 Vider la messagerie
+      </button>
+
+      <div id="notifList" class="notif-list"></div>
 
   </div>
 </div>
@@ -11009,22 +11013,36 @@ async function processScheduledTransfers(){
     }
   }
 
-  loadScheduledTransfersList();
+  await loadScheduledTransfersList();
 }
 
 loadScheduledTransfersList();
 
-/* ⚠️ Sur téléphone, on évite de scanner Firebase en boucle */
+/* ✅ Vérification plus ponctuelle sans bloquer le téléphone */
 if(!window.scheduledTransferIntervalStarted){
   window.scheduledTransferIntervalStarted = true;
 
-  setTimeout(()=>{
-    processScheduledTransfers();
-  }, 4000);
+  let scheduledProcessorRunning = false;
 
-  setInterval(()=>{
-    processScheduledTransfers();
-  }, 120000);
+  async function runScheduledProcessor(){
+    if(scheduledProcessorRunning) return;
+
+    scheduledProcessorRunning = true;
+
+    try{
+      await processScheduledTransfers();
+    }catch(e){
+      console.log("Erreur transfert programmé :", e);
+    }
+
+    scheduledProcessorRunning = false;
+  }
+
+  // première vérification rapide
+  setTimeout(runScheduledProcessor, 1000);
+
+  // vérification toutes les 10 secondes
+  setInterval(runScheduledProcessor, 10000);
 }
 
 /* ===============================
@@ -11641,188 +11659,176 @@ document.addEventListener("click", (e)=>{
   });
 });
 
-window.openModal = async function(contentId){
-
-console.log("Ouverture :", contentId);
-
-const modal = document.getElementById("modal");
-const modalBody = document.getElementById("modalBody");
-const content = document.getElementById(contentId);
-
-if(!content){
-console.error("❌ Introuvable :", contentId);
-return;
-}
-
-/* 🔥 déplacer contenu */
-modalBody.innerHTML = "";
-modalBody.appendChild(content);
-content.style.display = "block";
-modal.classList.remove("hidden");
-
-if(contentId === "vaultBox"){
-  await loadVaultStatus();
-}
-
-/* =========================
-   🔔 NOTIFICATIONS
-========================= */
-if(contentId === "notifBox"){
-const snap = await get(ref(db,"notifications/"+currentUser.phone));
-
-if(snap.exists()){
-Object.entries(snap.val()).forEach(([id,n])=>{
-if(!n.seen){
-update(ref(db,"notifications/"+currentUser.phone+"/"+id),{
-seen:true
-});
-}
-});
-}
-
-// inutile : listenNotifications met déjà la boîte à jour automatiquement
-}
-
-
-/* =========================
-   📱 CONTACTS INTELLIGENTS
-========================= */
-if(contentId === "transferBox"){
-
-const receiver = content.querySelector("#receiver");
-const contactsBox = content.querySelector("#contactsList");
-const receiverName = content.querySelector("#receiverName");
-
-/* 🔥 ouverture contacts */
-receiver.onfocus = ()=>{
-  const list = filterUsersSmart(receiver.value);
-  renderSmartContacts(list, contactsBox);
-  contactsBox.classList.remove("hidden");
-};
-
-/* 🔥 filtrage intelligent directement dans le champ numéro */
-receiver.oninput = ()=>{
-  const list = filterUsersSmart(receiver.value);
-  renderSmartContacts(list, contactsBox);
-  contactsBox.classList.remove("hidden");
-
-  updateReceiverNameSmart(receiver, receiverName);
-
-  /* 🔥 conversion live */
-  updateConversion();
-};
-
-/* 🔥 clic contact */
-contactsBox.onclick = (e)=>{
-
-  const item = e.target.closest(".contact-item");
-  if(!item || !item.dataset.phone) return;
-
-  const phone = item.dataset.phone;
-  const name = item.dataset.name || "Utilisateur";
-
+function setupTransferContacts(content){
+  const receiver = content.querySelector("#receiver");
+  const contactsBox = content.querySelector("#contactsList");
+  const receiverName = content.querySelector("#receiverName");
   const selectedBox = content.querySelector("#selectedContact");
 
-  selectedBox.innerHTML = `
-    <div class="contact-avatar">${name.charAt(0)}</div>
-    <div>
-      <strong>${name}</strong><br>
-      ${phone}
-    </div>
-  `;
+  if(!receiver || !contactsBox) return;
 
-  selectedBox.classList.remove("hidden");
+  receiver.onfocus = ()=>{
+    const list = filterUsersSmart(receiver.value);
+    renderSmartContacts(list, contactsBox);
+    contactsBox.classList.remove("hidden");
+  };
 
-  receiver.value = phone;
-  receiverName.innerText = "👤 " + name;
+  receiver.oninput = ()=>{
+    const list = filterUsersSmart(receiver.value);
+    renderSmartContacts(list, contactsBox);
+    contactsBox.classList.remove("hidden");
+    if(receiverName) updateReceiverNameSmart(receiver, receiverName);
+    updateTransferSummary();
+    updateConversion();
+  };
 
-  contactsBox.classList.add("hidden");
+  contactsBox.onclick = (e)=>{
+    const item = e.target.closest(".contact-item");
+    if(!item || !item.dataset.phone) return;
 
-  /* 🔥 conversion */
-  updateConversion();
-};
+    const phone = item.dataset.phone;
+    const name = item.dataset.name || "Utilisateur";
 
+    receiver.value = phone;
 
+    if(receiverName){
+      receiverName.innerText = "👤 " + name;
+    }
+
+    if(selectedBox){
+      selectedBox.innerHTML = `
+        <div class="contact-avatar">${name.charAt(0)}</div>
+        <div><strong>${name}</strong><br>${phone}</div>
+      `;
+      selectedBox.classList.remove("hidden");
+    }
+
+    contactsBox.classList.add("hidden");
+    updateTransferSummary();
+    updateConversion();
+  };
 }
 
-/* =========================
-   📅 CONTACTS INTELLIGENTS - TRANSFERT PROGRAMMÉ
-========================= */
-if(contentId === "scheduledTransferBox"){
+function setupScheduledContacts(content){
+  const receiver = content.querySelector("#scheduledReceiver");
+  const contactsBox = content.querySelector("#scheduledContactsList");
+  const receiverName = content.querySelector("#scheduledReceiverName");
+  const selectedBox = content.querySelector("#scheduledSelectedContact");
 
-const receiver = content.querySelector("#scheduledReceiver");
-const contactsBox = content.querySelector("#scheduledContactsList");
-const receiverName = content.querySelector("#scheduledReceiverName");
-const selectedBox = content.querySelector("#scheduledSelectedContact");
+  if(!receiver || !contactsBox) return;
 
-/* 🔥 ouverture contacts */
-receiver.onfocus = ()=>{
-  const list = filterUsersSmart(receiver.value);
-  renderSmartContacts(list, contactsBox);
-  contactsBox.classList.remove("hidden");
-};
+  receiver.onfocus = ()=>{
+    const list = filterUsersSmart(receiver.value);
+    renderSmartContacts(list, contactsBox);
+    contactsBox.classList.remove("hidden");
+  };
 
-/* 🔥 filtrage intelligent directement dans le champ numéro */
-receiver.oninput = ()=>{
-  const list = filterUsersSmart(receiver.value);
-  renderSmartContacts(list, contactsBox);
-  contactsBox.classList.remove("hidden");
+  receiver.oninput = ()=>{
+    const list = filterUsersSmart(receiver.value);
+    renderSmartContacts(list, contactsBox);
+    contactsBox.classList.remove("hidden");
+    if(receiverName) updateReceiverNameSmart(receiver, receiverName);
+    updateScheduleSummary();
+    updateScheduledConversion();
+  };
 
-  updateReceiverNameSmart(receiver, receiverName);
+  contactsBox.onclick = (e)=>{
+    const item = e.target.closest(".contact-item");
+    if(!item || !item.dataset.phone) return;
 
-  /* 🔥 conversion live */
-  updateScheduledConversion();
-};
+    const phone = item.dataset.phone;
+    const name = item.dataset.name || "Utilisateur";
 
-/* 🔥 clic contact */
-contactsBox.onclick = (e)=>{
+    receiver.value = phone;
 
-  const item = e.target.closest(".contact-item");
-  if(!item || !item.dataset.phone) return;
+    if(receiverName){
+      receiverName.innerText = "👤 " + name;
+    }
 
-  const phone = item.dataset.phone;
-  const name = item.dataset.name || "Utilisateur";
+    if(selectedBox){
+      selectedBox.innerHTML = `
+        <div class="contact-avatar">${name.charAt(0)}</div>
+        <div><strong>${name}</strong><br>${phone}</div>
+      `;
+      selectedBox.classList.remove("hidden");
+    }
 
-  selectedBox.innerHTML = `
-    <div class="contact-avatar">${name.charAt(0)}</div>
-    <div>
-      <strong>${name}</strong><br>
-      ${phone}
-    </div>
-  `;
-
-  selectedBox.classList.remove("hidden");
-
-  receiver.value = phone;
-  receiverName.innerText = "👤 " + name;
-
-  contactsBox.classList.add("hidden");
-
-  /* 🔥 conversion programmée */
-  updateScheduledConversion();
-};
-
-/* 🔥 fermer liste */
-
+    contactsBox.classList.add("hidden");
+    updateScheduleSummary();
+    updateScheduledConversion();
+  };
 }
 
+window.openModal = async function(contentId){
+  const modal = document.getElementById("modal");
+  const modalBody = document.getElementById("modalBody");
+  const hiddenZone = document.getElementById("hiddenZone");
+  const content = document.getElementById(contentId);
+
+  if(!modal || !modalBody || !hiddenZone || !content) return;
+
+  while(modalBody.firstChild){
+    hiddenZone.appendChild(modalBody.firstChild);
+  }
+
+  modalBody.appendChild(content);
+  content.style.display = "block";
+  modal.classList.remove("hidden");
+
+  if(contentId === "vaultBox"){
+    await loadVaultStatus();
+  }
+
+  if(contentId === "notifBox"){
+    const snap = await get(ref(db,"notifications/" + currentUser.phone));
+    if(snap.exists()){
+      const updates = [];
+      Object.entries(snap.val()).forEach(([id,n])=>{
+        if(!n.seen){
+          updates.push(update(ref(db,"notifications/" + currentUser.phone + "/" + id), {
+            seen:true
+          }));
+        }
+      });
+      await Promise.all(updates);
+    }
+  }
+
+  if(contentId === "transferBox"){
+    setupTransferContacts(content);
+  }
+
+  if(contentId === "scheduledTransferBox"){
+    setupScheduledContacts(content);
+    await loadScheduledTransfersList();
+  }
 };
-
-
 
 function closeModal(){
+  const modal = document.getElementById("modal");
+  const modalBody = document.getElementById("modalBody");
+  const hiddenZone = document.getElementById("hiddenZone");
 
-const modal = document.getElementById("modal");
-const modalBody = document.getElementById("modalBody");
-const hiddenZone = document.getElementById("hiddenZone");
+  while(modalBody.firstChild){
+    const child = modalBody.firstChild;
+    child.style.display = "none";
+    hiddenZone.appendChild(child);
+  }
 
-/* 🔥 remettre les éléments à leur place */
-while(modalBody.firstChild){
-hiddenZone.appendChild(modalBody.firstChild);
+  modal.classList.add("hidden");
 }
 
-modal.classList.add("hidden");
-}
+window.clearAllNotifications = async function(){
+  const ok = confirm("Vider toute la messagerie ?");
+  if(!ok) return;
+
+  await remove(ref(db, "notifications/" + currentUser.phone));
+  renderNotifications({ exists:()=>false });
+};
+
+window.deleteNotif = async function(id){
+  await remove(ref(db, "notifications/" + currentUser.phone + "/" + id));
+};
 
 /* =========================
 🧹 LIMITER HISTORIQUE À 10 ACTIVITÉS
