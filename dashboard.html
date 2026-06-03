@@ -11811,8 +11811,13 @@ function closeModal(){
 
   while(modalBody.firstChild){
     const child = modalBody.firstChild;
-    child.style.display = "none";
-    hiddenZone.appendChild(child);
+
+    if(child.id === "qrBoxTemp"){
+      child.remove();
+    }else{
+      child.style.display = "none";
+      hiddenZone.appendChild(child);
+    }
   }
 
   modal.classList.add("hidden");
@@ -12004,73 +12009,60 @@ closeModal();
 });
 
 window.showQR = function(){
-
   const modal = document.getElementById("modal");
   const modalBody = document.getElementById("modalBody");
+  const hiddenZone = document.getElementById("hiddenZone");
 
-  modalBody.innerHTML = `
-    <div class="qr-wrapper">
+  while(modalBody.firstChild){
+    const child = modalBody.firstChild;
+    child.style.display = "none";
+    hiddenZone.appendChild(child);
+  }
 
-      <h2 class="qr-modal-title">📱 Mon QR</h2>
+  const qrBox = document.createElement("div");
+  qrBox.id = "qrBoxTemp";
+  qrBox.className = "qr-wrapper";
 
-      <p class="qr-modal-subtitle">
-        Présente ce QR à une personne pour recevoir un paiement rapidement.
-      </p>
+  qrBox.innerHTML = `
+    <h2 class="qr-modal-title">📱 Mon QR</h2>
+    <p class="qr-modal-subtitle">
+      Présente ce QR à une personne pour recevoir un paiement rapidement.
+    </p>
 
-      <div class="qr-card">
-
-        <div class="qr-bank-card">
-
-          <div class="qr-brand">
-            <span>💎 COBRA</span>
-            <span>${tr("valid")}</span>
-          </div>
-
-          <div class="qr-phone">
-            ${currentUser.phone}
-          </div>
-
-          <div class="qr-user-row">
-            <span>${currentUser.name || "Utilisateur"}</span>
-            <span>Compte actif</span>
-          </div>
-
+    <div class="qr-card">
+      <div class="qr-bank-card">
+        <div class="qr-brand">
+          <span>💎 COBRA</span>
+          <span>${tr("valid")}</span>
         </div>
 
-        <div class="qr-code-zone">
+        <div class="qr-phone">${currentUser.phone}</div>
 
-          <canvas id="qrCanvas"></canvas>
-
-          <p class="qr-scan-text">
-            ${tr("scanToPay")}
-          </p>
-
-          <button class="qr-copy-btn" onclick="copyMyPhone()">
-            📋 Copier mon numéro
-          </button>
-
+        <div class="qr-user-row">
+          <span>${currentUser.name || "Utilisateur"}</span>
+          <span>Compte actif</span>
         </div>
-
       </div>
 
+      <div class="qr-code-zone">
+        <canvas id="qrCanvas"></canvas>
+        <p class="qr-scan-text">${tr("scanToPay")}</p>
+        <button class="qr-copy-btn" onclick="copyMyPhone()">📋 Copier mon numéro</button>
+      </div>
     </div>
   `;
 
+  modalBody.appendChild(qrBox);
   modal.classList.remove("hidden");
 
   setTimeout(()=>{
-
-    QRCode.toCanvas(
-      document.getElementById("qrCanvas"),
-      currentUser.phone,
-      {
-        width: 180,
-        margin: 1
-      }
-    );
-
+    if(window.QRCode){
+      QRCode.toCanvas(document.getElementById("qrCanvas"), currentUser.phone, {
+        width:180,
+        margin:1
+      });
+    }
   },100);
-
 };
 
 window.copyMyPhone = async function(){
