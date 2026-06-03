@@ -9287,6 +9287,11 @@ function tr(key){
   return t[key] || translations.fr[key] || key;
 }
 
+async function loadNotifications(){
+  const snap = await get(ref(db, "notifications/" + currentUser.phone));
+  renderNotifications(snap);
+}
+
 function applyLanguage(){
   const lang = getUserLang();
   const t = translations[lang] || translations.fr;
